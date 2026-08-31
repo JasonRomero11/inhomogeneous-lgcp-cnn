@@ -1,0 +1,68 @@
+# Este repositorio guarda lo mínimo: los cuatro scripts, los datos de entrada,
+# el conjunto de simulaciones que produce el script 01 y cinco figuras.
+# Todo lo demás son salidas calculadas que los scripts regeneran.
+
+# ---- Manuscrito LaTeX y documento de diseño: aún no se publican ----
+paper/
+docs/
+
+# ---- Paper de referencia de terceros (Zou et al., arXiv 2607.13113) ----
+# Fuente LaTeX ajena: no se redistribuye.
+reference/
+
+# ---- Salidas de simulación: sólo el conjunto de entrenamiento y sus metadatos --
+Results_simulation_sismos/
+Results_simulation_sismos_multiescala_matern/*
+!Results_simulation_sismos_multiescala_matern/sim_*.rds
+!Results_simulation_sismos_multiescala_matern/design_meta.rds
+!Results_simulation_sismos_multiescala_matern/observed_inputs.rds
+
+# ---- Figuras: sólo las cinco del paper; el resto lo regeneran los scripts -----
+figures_sismos_multiescala_matern/*
+!figures_sismos_multiescala_matern/mapa_cnn_comparado.pdf
+!figures_sismos_multiescala_matern/scatter_CNN_Ifeat.pdf
+!figures_sismos_multiescala_matern/envolvente.pdf
+!figures_sismos_multiescala_matern/bootstrap_hist.pdf
+!figures_sismos_multiescala_matern/residuos_conteo.pdf
+
+# ---- data/: sólo lo que leen los scripts finales ----
+data/dextral_im_scaled.rds
+data/normal_im_scaled.rds
+data/sinestral_im_scaled.rds
+data/volcanes_im.rds
+data/shapeZona_sp.rds
+
+# ---- Scripts retirados y copias de trabajo ----
+scripts/bk/
+*.bak
+*.bak_*
+*.broken
+
+# ---- Copias de seguridad locales ----
+*.BAK_*/
+*.PAPER_BAK_*/
+*.bak-*
+
+# ---- Auxiliares de LaTeX ----
+*.aux
+*.log
+*.blg
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*-eps-converted-to.pdf
+texput.log
+
+# ---- R ----
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+
+# ---- Sistema / editor ----
+.DS_Store
+.vscode/

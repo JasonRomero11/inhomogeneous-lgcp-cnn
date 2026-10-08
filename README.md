@@ -174,10 +174,13 @@ Minimum contrast on its full 1 000-realisation subsample: σ R² = 0.44,
 |---|---|---|---|---|
 | CNN + multiscale bank | 2.280 | [1.90, 2.64] | 22.6 | [15.8, 33.2] |
 | INLA-SPDE (joint, ccd) | 1.957 | [1.72, 2.23] | 38.0 | [32.9, 44.0] |
-| Minimum contrast (K) | 2.127 | — | 39.2 | — |
+| Minimum contrast (`K_inhom`, r ≥ 2 km) | 2.13 | — | 27.1 | — |
 
 CNN intervals are percentile parametric bootstrap, 200 replicates; INLA
-intervals are posterior credible intervals.
+intervals are posterior credible intervals. The minimum-contrast row uses the
+protocol of script 09 (`rmin` = 2 km, border correction, three starts); with
+the default `r` grid of `lgcp.estK`, as in the reference stored by script 01,
+the same fit gives ξ̂ = 39.2 km, a sign of how flat the contrast is in ξ.
 
 **Validation.** The observed count falls inside the range of 99 realisations
 under the fitted model; the DCLF test on the inhomogeneous K gives **p = 0.40**,

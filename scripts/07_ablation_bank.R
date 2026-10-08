@@ -1,4 +1,4 @@
-# Ablation of the multiscale descriptor bank, and comparison with the joint
+# Ablation of the multiscale descriptor bank, and comparison with the
 # INLA-SPDE fit on the same test realisations.
 #
 # Three versions of the estimator are compared on the test split of
@@ -12,7 +12,7 @@
 #   multiscale   the 43-descriptor bank of the paper (predictions read from
 #                outputs/cnn_pred_test.csv, written by 02_train_cnn.R)
 #
-# The joint INLA-SPDE fit (trend and field estimated together) was run on 200
+# The INLA-SPDE fit (trend and field estimated together) was run on 200
 # of those test realisations by scripts/bk/04_INLA_SPDE_conjunto_sismosJason.R;
 # its estimates are read from outputs/inla_conjunto_estimates_sims.csv.
 #
@@ -120,7 +120,7 @@ train_variant <- function(label, feat_idx, feat_units = c(32, 16)) {
 FIT_NOBANK <- train_variant("no_bank", NULL)
 FIT_SINGLE <- train_variant("single_scale", match(SINGLE_COLS, FEAT_COLS), c(32, 16))
 
-# ---- 4. Multiscale predictions of the paper and INLA joint estimates --------
+# ---- 4. Multiscale predictions of the paper and INLA-SPDE estimates ---------
 pred_ms <- readr::read_csv(file.path(OUT_DIR, "cnn_pred_test.csv"), show_col_types = FALSE)
 stopifnot(identical(as.integer(pred_ms$gid), as.integer(idx_te)),
           max(abs(pred_ms$sigma_true - TRUE_PAR[, "sigma"])) < 1e-9)
@@ -157,7 +157,7 @@ metrics_set <- function(d, set, with_inla) {
   out <- purrr::map_dfr(names(cnn_methods), function(m) purrr::map_dfr(PAR_COLS, function(p)
     metric_row(d[[paste0(p, "_true")]], d[[paste0(p, "_", m)]], cnn_methods[[m]], set, p)))
   if (with_inla) out <- bind_rows(out, purrr::map_dfr(PAR_COLS, function(p)
-    metric_row(d[[paste0(p, "_true")]], d[[paste0(p, "_inla")]], "INLA-SPDE (joint)", set, p)))
+    metric_row(d[[paste0(p, "_true")]], d[[paste0(p, "_inla")]], "INLA-SPDE", set, p)))
   out
 }
 
@@ -178,7 +178,7 @@ INLA_SUMMARY <- tibble(
   median_time_s = median(JOINT$inla_time_s, na.rm = TRUE),
   median_time_converged_s = median(dom$inla_time_s, na.rm = TRUE)
 )
-message("\nINLA-SPDE joint fit:"); print(INLA_SUMMARY)
+message("\nINLA-SPDE fit:"); print(INLA_SUMMARY)
 write_csv(INLA_SUMMARY, file.path(OUT_DIR, paste0(PREFIX, "inla_summary.csv")))
 
 write_csv(tibble(variant = c("no_bank", "single_scale", "multiscale"),

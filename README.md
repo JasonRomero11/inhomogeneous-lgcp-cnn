@@ -2,7 +2,7 @@
 
 Simulation-based inference for inhomogeneous log-Gaussian Cox processes: a CNN
 over a multiscale bank of intensity descriptors, evaluated by simulation and
-compared with minimum contrast and INLA-SPDE, with Colombian seismicity as the
+compared with INLA-SPDE, with Colombian seismicity as the
 illustration.
 
 Code, data and figures for *Neural estimation of the latent-field parameters
@@ -68,7 +68,7 @@ Predictions average 5 training replicates.
 ## Repository layout
 
 ```
-scripts/       the pipeline, run in order 01 → 04; 06–09 are the sensitivity check and the estimator comparison
+scripts/       the pipeline, run in order 01 → 04; 06–07 are the sensitivity check and the estimator comparison
 data/          window, catalogue and covariate rasters
 simulations/   the 200 simulation chunks, design_meta.rds, observed_inputs.rds
 figures/       the nine figures of the manuscript
@@ -87,12 +87,10 @@ pipeline.
 |---|---|---|---|---|
 | `01_simulate_training_set.R` | draws 20 000 designs, simulates one LGCP realisation each, extracts the two-step inputs | `data/` | `simulations/sim_%04d.rds`, `observed_inputs.rds`, `design_meta.rds` | ~3.3 h on 8 cores |
 | `02_train_cnn.R` | trains the CNN (5 seeds), evaluates on test, estimates the catalogue, DCLF envelope, parametric bootstrap | `simulations/sim_*.rds` | `metrics.csv`, `estimates_observed.csv`, `bootstrap_ic.csv`, `model_cnn/` | GPU-bound |
-| `03_fit_inla_spde.R` | joint INLA-SPDE fit of the catalogue, ccd integration | `design_meta.rds`, `data/` | `inla_catalog_*.csv`, intensity map | 1.8 min + mesh build |
+| `03_fit_inla_spde.R` | INLA-SPDE fit of the catalogue (trend and field together), ccd integration | `design_meta.rds`, `data/` | `inla_catalog_*.csv`, intensity map | 1.8 min + mesh build |
 | `04_intensity_map.R` | plug-in map from the CNN estimates, side by side with the INLA map | `estimates_observed.csv` | `cnn_map_*.csv/pdf` | 6.8 s + 105 s |
 | `06_sensitivity_mc.R` | repeats the whole inference (two-step chain, 5-seed CNN, bootstrap, DCLF envelope, INLA-SPDE) on the events with Mw ≥ 1.92, the completeness magnitude of the 2018–2020 network | `simulations/`, `data/`, outputs of 02–03 | `sens_mc_*.csv/pdf/tex`, `sens_mc_model_s*/` | ~17 min (11 min retraining) |
-| `07_ablation_bank.R` | ablation of the descriptor bank: retrains the network without descriptors and with the 8 descriptors of the single most informative scale (same split, scalers, head and seeds), and compares with the joint INLA-SPDE fits | `simulations/`, `cnn_pred_test.csv`, `inla_conjunto_estimates_sims.csv` | `ablation_*.csv` | ~18 min |
-| `09_minimum_contrast.R` | minimum-contrast fit of `(σ, ξ)` on the inhomogeneous `K` (Matérn ν = 1, border correction, `rmin` = 2 km, bounded multi-start) for 1 000 test realisations, in the same two-step protocol | `simulations/`, `data/` | `mc_fixed_*.csv` | ~10 min on 11 cores |
-| `08_comparison_table.R` | metrics of the five estimators on the common test realisations | outputs of 07, 09 and the joint INLA-SPDE runs | `comparison_*.csv` | seconds |
+| `07_ablation_bank.R` | ablation of the descriptor bank: retrains the network without descriptors and with the 8 descriptors of the single most informative scale (same split, scalers, head and seeds), and compares with the INLA-SPDE fits | `simulations/`, `cnn_pred_test.csv`, `inla_conjunto_estimates_sims.csv` | `ablation_*.csv` | ~18 min |
 
 Run every script **from the repository root**:
 
@@ -120,7 +118,7 @@ script 03, so run the pipeline in order.
 | `fig6_parametric_bootstrap.pdf` | bootstrap distribution of the catalogue estimate |
 | `fig7_intensity_maps.pdf` | expected intensity, INLA-SPDE next to CNN |
 | `fig8_k_envelope.pdf` | simulation envelope of the inhomogeneous `K` |
-| `fig9_estimator_comparison.pdf` | true vs estimated `(σ, ξ)` for the five estimators on the realisations where joint INLA-SPDE converged |
+| `fig9_estimator_comparison.pdf` | true vs estimated `(σ, ξ)` for the four estimators on the realisations where INLA-SPDE converged |
 
 Figures 1 and 3 are TikZ diagrams; the rest come from the pipeline, redrawn
 without titles for the manuscript.
@@ -152,35 +150,27 @@ changes (script 07):
 
 One scale is enough for `σ`; the gain on `ξ` comes from the multiscale profile.
 
-**Comparison with classical estimators** on the same test realisations
-(scripts 08–09). Joint INLA-SPDE (trend and field estimated together, 200
-random test realisations) returned no valid fit in 49 % of them (timeouts or
-estimates outside the design support), with a median of 69 s per fit; on the
-102 valid ones:
+**Comparison with INLA-SPDE** on the same test realisations (script 07).
+INLA-SPDE (trend and field estimated together, 200 random test realisations)
+returned no valid fit in 49 % of them (timeouts or estimates outside the
+design support), with a median of 69 s per fit; on the 102 valid ones:
 
 | Estimator | σ R² | ξ R² | ξ bias |
 |---|---|---|---|
 | CNN, multiscale bank | 0.903 | 0.649 | −4.2 km |
+| CNN, single scale | 0.905 | 0.580 | −5.3 km |
 | CNN, no descriptors | 0.860 | 0.553 | −7.2 km |
-| Joint INLA-SPDE | 0.878 | 0.557 | −12.9 km |
-| Minimum contrast (`K_inhom`) | 0.447 | 0.002 | −11.6 km |
-
-Minimum contrast on its full 1 000-realisation subsample: σ R² = 0.44,
-ξ R² = −0.17 (133 of the 1 000 scale estimates sit at the 150 km upper bound) (`mc_fixed_metrics.csv`).
+| INLA-SPDE | 0.878 | 0.557 | −12.9 km |
 
 **2020 seismic catalogue** (17 857 declustered events), used as the illustration:
 
 | Method | σ̂ | 95 % interval | ξ̂ (km) | 95 % interval |
 |---|---|---|---|---|
 | CNN + multiscale bank | 2.280 | [1.90, 2.64] | 22.6 | [15.8, 33.2] |
-| INLA-SPDE (joint, ccd) | 1.957 | [1.72, 2.23] | 38.0 | [32.9, 44.0] |
-| Minimum contrast (`K_inhom`, r ≥ 2 km) | 2.13 | — | 27.1 | — |
+| INLA-SPDE (ccd) | 1.957 | [1.72, 2.23] | 38.0 | [32.9, 44.0] |
 
 CNN intervals are percentile parametric bootstrap, 200 replicates; INLA
-intervals are posterior credible intervals. The minimum-contrast row uses the
-protocol of script 09 (`rmin` = 2 km, border correction, three starts); with
-the default `r` grid of `lgcp.estK`, as in the reference stored by script 01,
-the same fit gives ξ̂ = 39.2 km, a sign of how flat the contrast is in ξ.
+intervals are posterior credible intervals.
 
 **Validation.** The observed count falls inside the range of 99 realisations
 under the fitted model; the DCLF test on the inhomogeneous K gives **p = 0.40**,
@@ -189,7 +179,7 @@ correlation of **0.997** over 52 841 cells.
 
 The scale estimates differ by more than the variance ones, which is consistent
 with the weak identifiability of the LGCP scale from a single realisation. The
-direction of the difference is not systematic: in the simulations above joint
+direction of the difference is not systematic: in the simulations above
 INLA-SPDE underestimates `ξ` on average, whereas Zou et al.
 ([arXiv:2607.13113](https://arxiv.org/abs/2607.13113)) report overestimation.
 Restricting the catalogue to its completeness magnitude (Mw ≥ 1.92, 4 120

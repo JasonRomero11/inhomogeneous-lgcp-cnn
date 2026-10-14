@@ -1,5 +1,4 @@
-# Ablation of the multiscale descriptor bank, and comparison with the
-# INLA-SPDE fit on the same test realisations.
+# Ablation of the multiscale descriptor bank.
 #
 # Three versions of the estimator are compared on the test split of
 # 02_train_cnn.R, with the same split, scalers, architecture, training schedule
@@ -12,9 +11,8 @@
 #   multiscale   the 43-descriptor bank of the paper (predictions read from
 #                outputs/cnn_pred_test.csv, written by 02_train_cnn.R)
 #
-# The INLA-SPDE fit (trend and field estimated together) was run on 200
-# of those test realisations by scripts/bk/04_INLA_SPDE_conjunto_sismosJason.R;
-# its estimates are read from outputs/inla_conjunto_estimates_sims.csv.
+# The test predictions of the three versions (ablation_pred_test.csv) are the
+# CNN side of the comparison with two-step INLA-SPDE in script 09.
 #
 # Nothing written by scripts 01-06 is modified. Outputs carry the prefix
 # "ablation_".
@@ -22,8 +20,7 @@
 # Usage:  Rscript scripts/07_ablation_bank.R   (from the repository root)
 
 stopifnot(file.exists("scripts/02_train_cnn.R"),
-          file.exists("outputs/cnn_pred_test.csv"),
-          file.exists("outputs/inla_conjunto_estimates_sims.csv"))
+          file.exists("outputs/cnn_pred_test.csv"))
 
 T0 <- Sys.time()
 
@@ -120,7 +117,7 @@ train_variant <- function(label, feat_idx, feat_units = c(32, 16)) {
 FIT_NOBANK <- train_variant("no_bank", NULL)
 FIT_SINGLE <- train_variant("single_scale", match(SINGLE_COLS, FEAT_COLS), c(32, 16))
 
-# ---- 4. Multiscale predictions of the paper and INLA-SPDE estimates ---------
+# ---- 4. Multiscale predictions of the paper ----------------------------------
 pred_ms <- readr::read_csv(file.path(OUT_DIR, "cnn_pred_test.csv"), show_col_types = FALSE)
 stopifnot(identical(as.integer(pred_ms$gid), as.integer(idx_te)),
           max(abs(pred_ms$sigma_true - TRUE_PAR[, "sigma"])) < 1e-9)
@@ -131,15 +128,6 @@ PRED <- tibble(gid = idx_te,
                sigma_single  = FIT_SINGLE$pred[, "sigma"], xi_single  = FIT_SINGLE$pred[, "xi"],
                sigma_multi   = pred_ms$sigma_cnn,          xi_multi   = pred_ms$xi_cnn)
 write_csv(PRED, file.path(OUT_DIR, paste0(PREFIX, "pred_test.csv")))
-
-# Several rows per gid are possible in the INLA file (retries); keep the last.
-INLA <- readr::read_csv(file.path(OUT_DIR, "inla_conjunto_estimates_sims.csv"),
-                        show_col_types = FALSE) %>%
-  group_by(gid) %>% slice_tail(n = 1) %>% ungroup() %>%
-  transmute(gid, sigma_inla = sigma, xi_inla = xi, inla_domain = dominio,
-            inla_time_s = tiempo_total_s)
-stopifnot(nrow(INLA) == 200, all(INLA$gid %in% idx_te))
-JOINT <- inner_join(PRED, INLA, by = "gid")
 
 # ---- 5. Metrics -------------------------------------------------------------
 metric_row <- function(tv, pv, method, set, param) {
@@ -153,33 +141,13 @@ cnn_methods <- c(no_bank = "CNN without descriptors",
                  single  = "CNN, single-scale descriptors (8)",
                  multi   = "CNN, multiscale bank (43)")
 
-metrics_set <- function(d, set, with_inla) {
-  out <- purrr::map_dfr(names(cnn_methods), function(m) purrr::map_dfr(PAR_COLS, function(p)
-    metric_row(d[[paste0(p, "_true")]], d[[paste0(p, "_", m)]], cnn_methods[[m]], set, p)))
-  if (with_inla) out <- bind_rows(out, purrr::map_dfr(PAR_COLS, function(p)
-    metric_row(d[[paste0(p, "_true")]], d[[paste0(p, "_inla")]], "INLA-SPDE", set, p)))
-  out
-}
-
-dom <- JOINT %>% filter(inla_domain, is.finite(sigma_inla), is.finite(xi_inla))
-METRICS <- bind_rows(
-  metrics_set(PRED, "test (all)", FALSE),
-  metrics_set(JOINT, "INLA subset (200)", FALSE),
-  metrics_set(dom, sprintf("INLA converged in domain (%d)", nrow(dom)), TRUE)
-) %>% mutate(across(c(Bias, RMSE), ~ ifelse(param == "xi", .x / 1000, .x)))  # xi in km
+METRICS <- purrr::map_dfr(names(cnn_methods), function(m) purrr::map_dfr(PAR_COLS, function(p)
+  metric_row(PRED[[paste0(p, "_true")]], PRED[[paste0(p, "_", m)]], cnn_methods[[m]], "test (all)", p))) %>%
+  mutate(across(c(Bias, RMSE), ~ ifelse(param == "xi", .x / 1000, .x)))  # xi in km
 write_csv(METRICS, file.path(OUT_DIR, paste0(PREFIX, "metrics.csv")))
 
 message("\nMetrics (xi bias/RMSE in km):")
 print(METRICS %>% mutate(across(Bias:R2, ~ round(.x, 3))), n = Inf, width = Inf)
-
-INLA_SUMMARY <- tibble(
-  n_fits = nrow(JOINT), n_converged_in_domain = nrow(dom),
-  pct_failed = 100 * (1 - nrow(dom) / nrow(JOINT)),
-  median_time_s = median(JOINT$inla_time_s, na.rm = TRUE),
-  median_time_converged_s = median(dom$inla_time_s, na.rm = TRUE)
-)
-message("\nINLA-SPDE fit:"); print(INLA_SUMMARY)
-write_csv(INLA_SUMMARY, file.path(OUT_DIR, paste0(PREFIX, "inla_summary.csv")))
 
 write_csv(tibble(variant = c("no_bank", "single_scale", "multiscale"),
                  descriptors = c(0, 8, 43),

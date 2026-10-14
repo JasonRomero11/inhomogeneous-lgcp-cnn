@@ -1,243 +1,169 @@
 # inhomogeneous-lgcp-cnn
 
-Simulation-based inference for inhomogeneous log-Gaussian Cox processes: a CNN
-over a multiscale bank of intensity descriptors, evaluated by simulation and
-compared with INLA-SPDE, with Colombian seismicity as the
-illustration.
-
 Code, data and figures for *Neural estimation of the latent-field parameters
 of inhomogeneous log-Gaussian Cox processes with multiscale intensity
-descriptors* (Romero & Melo).
+descriptors* (Romero & Melo), submitted to the *Journal of Statistical
+Computation and Simulation*.
 
-> **Status:** the manuscript is prepared for submission to the *Journal of
-> Statistical Computation and Simulation* (Taylor & Francis). The LaTeX source
-> is not published here yet; this repository holds the code, the inputs, the
-> simulated training set and the figures of the manuscript.
+The method estimates the standard deviation `σ` and the correlation scale `ξ`
+of the latent field of an inhomogeneous LGCP with covariates. It is evaluated
+by simulation, compared with two-step INLA-SPDE and applied to the 2020
+Colombian seismic catalogue.
 
-## The problem
+## Model and method
 
-An inhomogeneous LGCP writes the random log-intensity in centred form
+The log-intensity is written in centred form
 
 ```
 log Λ(s) = β₀ + Σ βₖ Zₖ(s) + Y(s) − σ²/2
 ```
 
 with `Y` a zero-mean Gaussian field with Matérn covariance (ν = 1), standard
-deviation `σ` and scale `ξ`. Estimating `(σ, ξ)` is hard because the
-deterministic covariate trend and the latent field compete to explain the same
-smooth spatial variation.
+deviation `σ` and scale `ξ`.
 
-Existing simulation-based estimators feed the network almost exclusively the
-centred inhomogeneous `L` function, a second-order summary that averages the
-fluctuations of the field over space. The local heterogeneity of the intensity —
-the direct fingerprint of `σ` and `ξ` — is discarded by that average.
+Estimation has two steps:
 
-**This work adds a bank of 43 intensity descriptors read at several scales:**
-3 quadrat-dispersion metrics at 6 grid resolutions (k = 2…64) and 5
-kernel-density shape metrics at 5 bandwidths (10…160 km). The profile of those
-statistics across scales acts as a signature of the field's own scale.
+1. An inhomogeneous Poisson fit (`spatstat::ppm`) gives the trend
+   coefficients `β̂` and the trend intensity `λ̂(s)`.
+2. A CNN maps `(D(r), β̂, N, f)` to `(σ, ξ)`. `D(r) = L(r) − r` is the
+   centred inhomogeneous L curve and `f` is a bank of 43 intensity
+   descriptors: 3 quadrat-dispersion statistics on 6 grids (k = 2 to 64) and
+   5 kernel-density statistics at 5 bandwidths (10 to 160 km).
 
-## Method
-
-Two-step estimation, matching how the classical estimators work:
-
-1. **Stage 1** — inhomogeneous Poisson fit (`spatstat::ppm`) gives `β̂` and
-   `λ̂(s)`, taken as given thereafter.
-2. **Stage 2** — a CNN maps `(D(r), β̂, N, f)` to `(σ, ξ)`, where `D(r) = L(r) − r`
-   is the centred inhomogeneous L curve and `f` the 43 descriptors.
-
-The network has four branches concatenated into a shared head (79 186
-parameters):
+The network has four branches joined in a dense head (79 186 parameters):
 
 | Input | Shape | Branch |
 |---|---|---|
-| `D(r)` + `dD/dr` + `r/rmax` | 513 × 3 | 1D conv, 3 dilated blocks (1/2/4), avg-pool, flatten, dense 32 |
-| `β̂` | 5 | dense 32-16 |
+| `D(r)`, `dD/dr`, `r/rmax` | 513 × 3 | three 1D convolution blocks (dilation 1, 2, 4) with average pooling, dense 32 |
+| `β̂` | 5 | dense 32, 16 |
 | `N` | 1 | passed through |
-| descriptor bank | 43 | dense 64-32 |
+| descriptors `f` | 43 | dense 64, 32 |
 
-Dilation is what makes the receptive field cover the whole curve (270 km against
-the 82 km of undilated blocks) at no extra parameter cost. The third channel
-`r/rmax` is a coordinate channel: `ξ` is a scale parameter, encoded in *where*
-the curvature changes, and a plain convolution is translation-equivariant.
-
-Targets use a per-parameter link before standardisation — `sqrt` for `σ`, `log`
-for `ξ`, since `ξ` spans a factor of 15 and is reported as a relative error.
-Predictions average 5 training replicates.
+The targets are `sqrt(σ)` and `log(ξ)`, standardised. Predictions are the
+average of 5 training replicates.
 
 ## Repository layout
 
 ```
-scripts/       the pipeline, run in order 01 → 04; 06–07 are the sensitivity check and the estimator comparison
+scripts/       the pipeline, 01 to 10 (05 is not included)
 data/          window, catalogue and covariate rasters
 simulations/   the 200 simulation chunks, design_meta.rds, observed_inputs.rds
-figures/       the nine figures of the manuscript
+figures/       the figures
 outputs/       everything the pipeline computes (not versioned)
 ```
 
-The repository holds only inputs, the simulated training set and the
-manuscript figures. Every other artefact — metrics, estimates, LaTeX tables,
-the trained network, the intermediate figures and the INLA mesh cache — is a
-computed output that lands in `outputs/` and is regenerated by running the
-pipeline.
-
 ## Pipeline
 
-| Script | Does | Reads | Writes | Cost |
-|---|---|---|---|---|
-| `01_simulate_training_set.R` | draws 20 000 designs, simulates one LGCP realisation each, extracts the two-step inputs | `data/` | `simulations/sim_%04d.rds`, `observed_inputs.rds`, `design_meta.rds` | ~3.3 h on 8 cores |
-| `02_train_cnn.R` | trains the CNN (5 seeds), evaluates on test, estimates the catalogue, DCLF envelope, parametric bootstrap | `simulations/sim_*.rds` | `metrics.csv`, `estimates_observed.csv`, `bootstrap_ic.csv`, `model_cnn/` | GPU-bound |
-| `03_fit_inla_spde.R` | INLA-SPDE fit of the catalogue (trend and field together), ccd integration | `design_meta.rds`, `data/` | `inla_catalog_*.csv`, intensity map | 1.8 min + mesh build |
-| `04_intensity_map.R` | plug-in map from the CNN estimates, side by side with the INLA map | `estimates_observed.csv` | `cnn_map_*.csv/pdf` | 6.8 s + 105 s |
-| `06_sensitivity_mc.R` | repeats the whole inference (two-step chain, 5-seed CNN, bootstrap, DCLF envelope, INLA-SPDE) on the events with Mw ≥ 1.92, the completeness magnitude of the 2018–2020 network | `simulations/`, `data/`, outputs of 02–03 | `sens_mc_*.csv/pdf/tex`, `sens_mc_model_s*/` | ~17 min (11 min retraining) |
-| `07_ablation_bank.R` | ablation of the descriptor bank: retrains the network without descriptors and with the 8 descriptors of the single most informative scale (same split, scalers, head and seeds), and compares with the INLA-SPDE fits | `simulations/`, `cnn_pred_test.csv`, `inla_conjunto_estimates_sims.csv` | `ablation_*.csv` | ~18 min |
-
-Run every script **from the repository root**:
+Run every script from the repository root, in order:
 
 ```bash
 Rscript scripts/01_simulate_training_set.R
 ```
 
-The 200 `sim_*.rds` chunks are included, so script 02 can be trained without
-re-running the ~3.3 h simulation. Script 03 builds the INLA mesh on first run,
-which takes a few minutes and is then cached in `outputs/`. Script 04 reads
-`estimates_observed.csv`, written by script 02, and the mesh cache left by
-script 03, so run the pipeline in order.
+| Script | Does | Main outputs | Time |
+|---|---|---|---|
+| `01_simulate_training_set.R` | draws 20 000 designs, simulates one realisation each and computes the two-step inputs | `simulations/` | ~3.3 h, 8 cores |
+| `02_train_cnn.R` | trains the CNN (5 seeds), test metrics, catalogue estimate, DCLF envelope, parametric bootstrap | `metrics.csv`, `estimates_observed.csv`, `bootstrap_ic.csv`, `cnn_pred_test.csv` | GPU |
+| `03_fit_inla_spde.R` | builds and caches the INLA mesh used by the later scripts; also fits the catalogue with trend and field together | `inla_mesh_*.rds`, `inla_catalog_*.csv` | a few minutes |
+| `04_intensity_map.R` | CNN plug-in intensity map of the catalogue | `cnn_map_*` | ~2 min |
+| `06_sensitivity_mc.R` | repeats the inference on the events with Mw ≥ 1.92 (magnitude of completeness) and saves the 5-seed ensemble | `sens_mc_*`, `sens_mc_model_s*/` | ~17 min |
+| `07_ablation_bank.R` | retrains the network without descriptors and with the 8 descriptors of a single scale (same split, scalers, head and seeds) | `ablation_*.csv` | ~18 min |
+| `08_inla_two_step.R` | two-step INLA-SPDE of the catalogue (trend fixed at the ppm estimate), its map, the CNN map on the same grid and the Mw ≥ 1.92 subset | `inla2s_catalog_*.csv`, `inla2s_map_*.csv` | ~5 min |
+| `09_inla_two_step_simulations.R` | two-step INLA-SPDE on 500 random test realisations, regenerated from their seeds, and comparison with the CNN variants of 07 | `inla2s_sim_*.csv` | ~67 min, 8 workers |
+| `10_fixed_value_evaluation.R` | CNN and two-step INLA-SPDE at nine fixed values of `(σ, ξ)`, 50 realisations each | `fixed_*.csv` | ~70 min, 8 workers |
+
+The 200 `sim_*.rds` chunks are included, so the pipeline can start at script
+02. Scripts 09 and 10 cache each INLA fit and can be resumed.
 
 ## Figures
 
-`figures/` holds the nine figures of the manuscript:
-
 | File | Shows |
 |---|---|
-| `fig1_training_pipeline.pdf` | how one training realisation is generated |
+| `fig1_training_pipeline.pdf` | generation of one training realisation |
 | `fig2_count_residuals.pdf` | Pearson count residuals of the first-order fit |
-| `fig3_cnn_architecture.pdf` | architecture of the network |
-| `fig4_observed_vs_simulated.pdf` | observed catalogue next to one simulated realisation |
-| `fig5_parameter_recovery.pdf` | true vs estimated `(σ, ξ)` on the test set |
+| `fig3_cnn_architecture.pdf` | network architecture |
+| `fig4_observed_vs_simulated.pdf` | observed catalogue next to one simulated realisation (not in the manuscript) |
+| `fig5_parameter_recovery.pdf` | true against estimated `(σ, ξ)` on the test set |
 | `fig6_parametric_bootstrap.pdf` | bootstrap distribution of the catalogue estimate |
-| `fig7_intensity_maps.pdf` | expected intensity, INLA-SPDE next to CNN |
-| `fig8_k_envelope.pdf` | simulation envelope of the inhomogeneous `K` |
-| `fig9_estimator_comparison.pdf` | true vs estimated `(σ, ξ)` for the four estimators on the realisations where INLA-SPDE converged |
+| `fig7_intensity_maps.pdf` | expected intensity, INLA-SPDE and CNN |
+| `fig8_k_envelope.pdf` | simulation envelope of the inhomogeneous K function |
+| `fig9_estimator_comparison.pdf` | CNN variants and INLA-SPDE on the same 420 test realisations |
+| `fig10_fixed_value_boxplots.pdf` | CNN and INLA-SPDE at the nine fixed values |
 
-Figures 1 and 3 are TikZ diagrams; the rest come from the pipeline, redrawn
-without titles for the manuscript.
+## Main results
 
-## Results
+Test set, 2926 realisations (scripts 02 and 07):
 
-**Parameter recovery**, 2 926 test realisations, average of 5 seeds:
-
-| Parameter | Bias | RMSE | RMSE_rel | MAPE | R² |
+| Estimator | σ bias | σ R² | ξ bias | ξ RMSE | ξ R² |
 |---|---|---|---|---|---|
-| σ | −0.028 | 0.300 | 0.345 | 13.0 % | **0.881** |
-| ξ | −3.4 km | 24.9 km | 0.610 | 28.3 % | **0.628** |
+| CNN, no descriptors | −0.044 | 0.828 | −6.4 km | 28.4 km | 0.515 |
+| CNN, single scale (8 descriptors) | −0.022 | 0.879 | −4.2 km | 27.3 km | 0.553 |
+| CNN, multiscale bank (43 descriptors) | −0.028 | 0.881 | −3.4 km | 24.9 km | 0.628 |
 
-`RMSE_rel` is the RMSE over the standard deviation of the evaluated set: 1 means
-no better than predicting the mean. It is reported because on a narrow test
-range MAPE can look good while being worse than a constant — which is what
-happens in the narrow band [35, 55] km, where ξ gives R² = −13.2 despite a MAPE
-of 35 %. That negative value is a result, not a failure: ξ is not identifiable
-at that resolution from a single realisation.
+Comparison with two-step INLA-SPDE (script 09): 500 random test
+realisations; the 80 INLA-SPDE estimates outside the design support are
+excluded. On the remaining 420, the R² is 0.895 (CNN) and 0.803 (INLA-SPDE)
+for `σ`, and 0.638 and 0.149 for `ξ`. INLA-SPDE is more accurate for short
+scales (ξ < 55 km) and underestimates long ones. At the nine fixed values
+(script 10) the RMSE over the 450 realisations is 0.26 against 1.00 for `σ`
+and 21.3 km against 32.7 km for `ξ`.
 
-**Ablation of the descriptor bank**, same test set; only the descriptor branch
-changes (script 07):
+2020 catalogue (17 857 declustered events):
 
-| Estimator | σ R² | ξ R² | ξ RMSE |
-|---|---|---|---|
-| CNN, no descriptors (`D(r)`, `β̂`, `N`) | 0.828 | 0.515 | 28.4 km |
-| CNN, single scale (quadrats 64×64 + KDE 10 km, chosen on the training set) | 0.879 | 0.553 | 27.3 km |
-| CNN, multiscale bank (43) | **0.881** | **0.628** | **24.9 km** |
+| Method | σ̂ [95 %] | ξ̂ km [95 %] |
+|---|---|---|
+| CNN, multiscale bank | 2.28 [1.90, 2.64] | 22.6 [15.8, 33.2] |
+| Two-step INLA-SPDE | 1.95 [1.73, 2.21] | 37.3 [32.6, 42.9] |
 
-One scale is enough for `σ`; the gain on `ξ` comes from the multiscale profile.
-
-**Comparison with INLA-SPDE** on the same test realisations (script 07).
-INLA-SPDE (trend and field estimated together, 200 random test realisations)
-returned no valid fit in 49 % of them (timeouts or estimates outside the
-design support), with a median of 69 s per fit; on the 102 valid ones:
-
-| Estimator | σ R² | ξ R² | ξ bias |
-|---|---|---|---|
-| CNN, multiscale bank | 0.903 | 0.649 | −4.2 km |
-| CNN, single scale | 0.905 | 0.580 | −5.3 km |
-| CNN, no descriptors | 0.860 | 0.553 | −7.2 km |
-| INLA-SPDE | 0.878 | 0.557 | −12.9 km |
-
-**2020 seismic catalogue** (17 857 declustered events), used as the illustration:
-
-| Method | σ̂ | 95 % interval | ξ̂ (km) | 95 % interval |
-|---|---|---|---|---|
-| CNN + multiscale bank | 2.280 | [1.90, 2.64] | 22.6 | [15.8, 33.2] |
-| INLA-SPDE (ccd) | 1.957 | [1.72, 2.23] | 38.0 | [32.9, 44.0] |
-
-CNN intervals are percentile parametric bootstrap, 200 replicates; INLA
-intervals are posterior credible intervals.
-
-**Validation.** The observed count falls inside the range of 99 realisations
-under the fitted model; the DCLF test on the inhomogeneous K gives **p = 0.40**,
-so the fit is not rejected. The two intensity surfaces agree to a log-scale
-correlation of **0.997** over 52 841 cells.
-
-The scale estimates differ by more than the variance ones, which is consistent
-with the weak identifiability of the LGCP scale from a single realisation. The
-direction of the difference is not systematic: in the simulations above
-INLA-SPDE underestimates `ξ` on average, whereas Zou et al.
-([arXiv:2607.13113](https://arxiv.org/abs/2607.13113)) report overestimation.
-Restricting the catalogue to its completeness magnitude (Mw ≥ 1.92, 4 120
-events; script 06) leaves the clustering intact: CNN σ̂ = 2.47 [2.09, 2.98],
-ξ̂ = 24.1 km [17.7, 40.0], DCLF p = 0.84.
+CNN intervals: parametric bootstrap, 200 replicates. INLA-SPDE: posterior
+credible intervals. The DCLF test does not reject the CNN model (p = 0.40).
 
 ## Requirements
 
-R 4.5.2 with `spatstat` 3.3.3, `R-INLA` 24.11.25, `keras` 2.16.0 on a
-TensorFlow GPU backend, plus `sf`, `tidyverse`, `patchwork`, `pbmcapply`,
-`Matrix`.
+R 4.5.2 with `spatstat` 3.3.3, `R-INLA` 24.11.25 and `keras` 2.16.0 on a
+TensorFlow GPU backend, plus `sf`, `tidyverse`, `patchwork`, `pbmcapply` and
+`Matrix`. Script 02 needs Keras 2.x in the virtualenv
+`~/.virtualenvs/r-tensorflow` and stops if it finds Keras 3.
 
-Script 02 needs **Keras 2.x** and expects the virtualenv at
-`~/.virtualenvs/r-tensorflow`; it checks the version and stops if it finds
-Keras 3.
+Reference machine: Ryzen 9 7950X (16 cores), 64 GB RAM, RTX 4090, Ubuntu
+22.04.
 
-Reference machine: Ryzen 9 7950X (16 cores), 64 GB, RTX 4090, Ubuntu 22.04.
+## Seeds
 
-## Reproducibility
-
-Every source of randomness is seeded, and the ranges do not overlap:
-
-| Seed | Covers |
+| Seed | Used for |
 |---|---|
-| `BASE_SEED = 42`, then `42 + i` per realisation | the training design — independent of core count |
-| `123` | train/validation/test split, stratified |
+| `42 + i` | training design, realisation `i` |
+| `123` | train/validation/test split |
 | `1000 + i` | the 5 training replicates |
-| `1 … 99` | realisations from the fitted model |
-| `10000 + i` | the DCLF envelope |
-| `20000 + i` | the parametric bootstrap |
+| `1` to `99` | realisations from the fitted model |
+| `10000 + i` | DCLF envelope |
+| `20000 + i` | parametric bootstrap |
+| `20260803`, `20261008` | the 500 test realisations of script 09 |
+| `70000 + r`, `80000 + 1000k + 10r + attempt` | trend and pattern of replicate `r` at point `k` in script 10 |
 
-Script 02 also calls `tensorflow::set_random_seed()` and
-`enable_op_determinism()`, so convolutions and reductions accumulate in a fixed
-order. From a clean R session, two runs give identical numbers.
+Script 02 also sets `tensorflow::set_random_seed()` and
+`enable_op_determinism()`.
 
 ## Data
 
-The 2020 seismic catalogue is distributed publicly by the Servicio Geológico
-Colombiano (SGC). The covariate rasters — distance to reverse faults, isostatic
-anomaly, topography, distance to volcanoes — arrive already scaled to [−1, 1];
-`data/` holds only the four the final model uses.
+The 2020 seismic catalogue is public and distributed by the Servicio
+Geológico Colombiano (SGC). The covariate rasters (distance to reverse
+faults, isostatic anomaly, topography, distance to volcanoes) are scaled to
+[−1, 1].
 
 ## Citation
-
-If you use this code, please cite the manuscript:
 
 ```bibtex
 @unpublished{romero_melo_lgcp_cnn,
   author = {Romero, Jason and Melo, Carlos},
   title  = {Neural estimation of the latent-field parameters of inhomogeneous
             log-{G}aussian {C}ox processes with multiscale intensity descriptors},
-  note   = {Prepared for submission to the Journal of Statistical Computation
-            and Simulation},
+  note   = {Submitted to the Journal of Statistical Computation and Simulation},
   year   = {2026}
 }
 ```
 
 ## License
 
-MIT (see `LICENSE`). The seismic catalogue is redistributed under the terms of
-its original publisher, the Servicio Geológico Colombiano.
+MIT (see `LICENSE`). The seismic catalogue is redistributed under the terms
+of its publisher, the Servicio Geológico Colombiano.

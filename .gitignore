@@ -1,4 +1,4 @@
-# The repository keeps the minimum: the four scripts, the input data, the
+# The repository keeps the minimum: the scripts, the input data, the
 # simulated training set and the figures of the manuscript. Everything else is
 # a computed output that the pipeline regenerates.
 
